@@ -1,0 +1,117 @@
+version: '3.3'
+
+volumes:
+  nextcloud-www:
+    driver: local
+  nextcloud-db:
+    driver: local
+  redis:
+    driver: local
+
+
+services:
+
+  traefik:
+    image: traefik:v2.9.1
+    container_name: traefik
+    restart: always
+    command:
+      - "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--providers.file.directory=/configuration/"
+      - "--providers.file.watch=true"
+    ports:
+      - 80:80
+      - 443:443
+    networks:
+      - nextcloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=admin:$$apr1$$4vqie50r$$YQAmQdtmz5n9rEALhxJ4l." # defaults to admin:admin
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.rule=Host(`<example.example.tld>`)"
+      - "traefik.http.routers.traefik.middlewares=traefik-auth"
+      - "traefik.http.routers.traefik.tls.certresolver=websecure"
+      - "traefik.http.services.traefik.loadbalancer.server.port=443"
+      - "traefik.http.services.traefik.loadbalancer.server.scheme=https"
+      - "traefik.http.routers.traefik.service=api@internal"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "<full-path-to-config-files-folder>:/configuration/"
+      - "<location-of-your-certs>:/certs"
+
+  db:
+    restart: always
+    image: postgres:11
+    networks:
+      - nextcloud
+    environment:
+    - POSTGRES_USER=nextcloud
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_DB=nextcloud
+    volumes:
+    - nextcloud-db:/var/lib/postgresql/data
+  redis:
+    image: redis:latest
+    restart: always
+    networks:
+      - nextcloud
+    volumes:
+      - redis:/var/lib/redis
+
+  nextcloud:
+    image: nextcloud:latest
+    restart: always
+    networks:
+      - nextcloud
+    hostname: <example.example.tld>
+    depends_on:
+      - redis
+      - db
+    labels:
+      - traefik.http.routers.nextcloud.middlewares=nextcloud,nextcloud-redirectregex1,nextcloud-redirectregex2
+      - traefik.http.routers.nextcloud.tls.certresolver=websecure
+      - traefik.http.routers.nextcloud.rule=Host(`<example.example.tld>`)
+      - traefik.http.middlewares.nextcloud.headers.customFrameOptionsValue=ALLOW-FROM https://<example.tld>
+      - traefik.http.middlewares.nextcloud.headers.contentSecurityPolicy=frame-ancestors 'self' <example.tld> *.<example.tld>
+      - traefik.http.middlewares.nextcloud.headers.stsSeconds=155520011
+      - traefik.http.middlewares.nextcloud.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.nextcloud.headers.stsPreload=true
+      - traefik.http.services.nextcloud.loadbalancer.server.url=http://127.0.0.1:11000
+      - traefik.http.middlewares.nextcloud.headers.customresponseheaders.X-Frame-Options=SAMEORIGIN
+      - traefik.http.middlewares.nextcloud.headers.hostsProxyHeaders=X-Forwarded-Host
+      - traefik.http.middlewares.nextcloud.headers.referrerPolicy=same-origin
+      - traefik.http.middlewares.nextcloud.headers.customresponseheaders.X-Robots-Tag=none
+      - "traefik.http.middlewares.nextcloud-redirectregex1.redirectregex.permanent=true"
+      - "traefik.http.middlewares.nextcloud-redirectregex1.redirectregex.regex=https?://([^/]*)/.well-known/(card|cal)dav"
+      - "traefik.http.middlewares.nextcloud-redirectregex1.redirectregex.replacement=https://$${1}/remote.php/dav/"
+      - "traefik.http.middlewares.nextcloud-redirectregex2.redirectregex.permanent=true"
+      - "traefik.http.middlewares.nextcloud-redirectregex2.redirectregex.regex=https?://([^/]*)(/.well-known[^#]*)"
+      - "traefik.http.middlewares.nextcloud-redirectregex2.redirectregex.replacement=https://$${1}/index.php$${2}"
+    environment:
+      - OVERWRITECLIURL=https://<example.example.tld>
+      - OVERWRITEPROTOCOL=https
+      - POSTGRES_DB=nextcloud
+      - POSTGRES_USER=nextcloud
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_HOST=db
+      - NEXTCLOUD_ADMIN_USER=admin
+      - NEXTCLOUD_ADMIN_PASSWORD=adminpass
+      - APACHE_PORT=11000
+      - APACHE_IP_BINDING=127.0.0.1
+      - NEXTCLOUD_UPLOAD_LIMIT=20G
+      - REDIS_HOST=redis
+      - NEXTCLOUD_TRUSTED_DOMAINS=<example.example.tld>
+      - TRUSTED_PROXIES=172.18.0.0/16
+    volumes:
+      - nextcloud-www:/var/www/html
+
+networks:
+  nextcloud:
+
