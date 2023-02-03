@@ -1,5 +1,11 @@
 # nextcloud-docker-traefik
 
+Used Docker Compose
+Traefik
+Nextcloud
+redis
+postgres
+
 see and change as your needs.
 cant be 100 percent accurate.
 using custom certificates basically.
